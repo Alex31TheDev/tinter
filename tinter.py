@@ -2,19 +2,21 @@ import argparse
 import sys
 
 import re
-import math
 
-from os import path, listdir, makedirs
+from os import path, makedirs
 from PIL import Image, ImageColor, UnidentifiedImageError
 
-def blendPixel(pixel, color):
-    return (math.floor(pixel[0] * color[0]),
-            math.floor(pixel[1] * color[1]),
-            math.floor(pixel[2] * color[2]))
+from util import get_files
+from blend_modes import blend_modes
 
-def tintImage(image, colors):
+def tint_image(image, colors, blend_mode = 0):
     width, height = image.size
     pixels = image.load()
+
+    blend_func = blend_modes[blend_mode]
+
+    if blend_func is None:
+        raise Exception("Invalid blend mode")
 
     images = [Image.new("RGB", image.size) for i in range(len(colors))]
 
@@ -23,18 +25,82 @@ def tintImage(image, colors):
             pixel = pixels[x, y]
 
             if len(colors) == 1:
-                tinted = blendPixel(pixel, colors[0])
+                tinted = blend_func(pixel, colors[0])
                 images[0].putpixel((x, y), tinted)
             else:
                 for i, color in enumerate(colors):
-                    tinted = blendPixel(pixel, color)
+                    tinted = blend_func(pixel, color)
                     images[i].putpixel((x, y), tinted)
 
     return images
 
-def getFiles(dirPath):
-    files = [f for f in listdir(dirPath) if path.isfile(path.join(dirPath, f))]
-    return files
+def parse_paths(input_paths, base_path):
+    if base_path is not None:
+        base_path = path.abspath(base_path)
+
+    if base_path is None:
+        paths = input_paths
+    elif input_paths is None:
+        paths = get_files(base_path)
+        paths = [path.join(base_path, x) for x in paths]
+    else:
+        paths = [path.join(base_path, x) for x in input_paths]
+
+    return paths
+
+def parse_colors(color_strs):
+    colors, colors_ok = [], True
+
+    for color_str in color_strs:
+        color_match = re.match("^#?([a-fA-F0-9]{6})$", color_str)
+
+        if color_match is None:
+            print("Error: Invalid color:", color_str)
+            colors_ok = False
+        else:
+            color_hex = "#" + color_match.group(1)
+            parsed = ImageColor.getcolor(color_hex, "RGB")
+
+            color = (parsed[0] / 255, parsed[1] / 255, parsed[2] / 255)
+            colors.append(color)
+
+    return colors, colors_ok
+
+def load_images(paths):
+    images = []
+
+    for img_path in paths:
+        try:
+            images.append(Image.open(img_path, "r"))
+        except FileNotFoundError:
+            print(f"Error: Texture \"{img_path}\" wasn't found.")
+        except UnidentifiedImageError:
+            print(f"Error: Texture \"{img_path}\" is invalid.")
+        
+    return images
+
+def tint_and_save_images(images, colors, paths, output):
+    output = path.abspath(output)
+
+    for i, image in enumerate(images):
+        name, ext = path.splitext(paths[i])
+
+        try:
+            name = path.basename(name)
+        except:
+            pass
+        
+        tinted_images = tint_image(image, colors)
+        image.close()
+
+        multiple_images = len(tinted_images) > 1
+
+        for i, tinted_image in enumerate(tinted_images):
+            num = ("_" + str(i + 1)) if multiple_images else ""
+            img_path = path.join(output, f"{name}{num}{ext}")
+
+            tinted_image.save(img_path)
+            print("Saved:", img_path)
 
 usage = "Run python tinter.py --help for usage."
 
@@ -54,58 +120,20 @@ def main():
         return
 
     args = parser.parse_args()
-
-    if args.base is None:
-        paths = args.input
-    elif args.input is None:
-        paths = getFiles(args.base)
-    else:
-        paths = [path.join(args.base, x) for x in args.input]
+    paths = parse_paths(args.input, args.base)
     
     if args.output != "." and not path.exists(args.output):
         makedirs(args.output)
 
-    colors, colorsOk = [[], True]
-
-    for color in args.color:
-        colorMatch = re.match("^#?([a-fA-F0-9]{6})$", color)
-
-        if colorMatch is None:
-            print("Invalid color:", color)
-            colorsOk = False
-        else:
-            parsed = ImageColor.getcolor("#" + colorMatch.group(1), "RGB")
-            colors.append((parsed[0] / 255, parsed[1] / 255, parsed[2] / 255))
+    colors, colorsOk = parse_colors(args.color)
 
     if not colorsOk:
         print("\nAll colors must be hex.\n" + usage)
         return
     
-    images = []
+    images = load_images(paths)
+    tint_and_save_images(images, colors, paths, args.output)
 
-    for _path in paths:
-        try:
-            images.append(Image.open(_path, "r"))
-        except FileNotFoundError:
-            print("Texture", _path, "wasn't found.")
-        except UnidentifiedImageError:
-            print("Texture", _path, "is invalid.")
-
-    for i, image in enumerate(images):
-        name, ext = path.splitext(paths[i])
-
-        try:
-            name = path.basename(name)
-        except:
-            pass
-        
-        for i, out in enumerate(tintImage(image, colors)):
-            _path = path.join(args.output, f"{name}_{i + 1}{ext}")
-
-            out.save(_path)
-            print("Saved:", _path)
-
-        image.close()
 
 if __name__ == "__main__":
     main()
