@@ -7,17 +7,20 @@ from PIL import Image, UnidentifiedImageError
 from util import get_files, parse_color
 from blend_modes import blend_modes
 
+image_mode = "RGBA"
 
 def tint_image(image, colors, blend_mode=0):
     width, height = image.size
     pixels = image.load()
 
+    has_alpha = image.mode == "RGBA"
     blend_func = blend_modes[blend_mode]
 
     if blend_func is None:
         raise Exception("Invalid blend mode")
 
-    images = [Image.new("RGBA", image.size) for i in range(len(colors))]
+    color_count = len(colors)
+    images = [Image.new(image_mode, image.size) for i in range(color_count)]
 
     for x in range(width):
         for y in range(height):
@@ -25,10 +28,13 @@ def tint_image(image, colors, blend_mode=0):
 
             for i, color in enumerate(colors):
                 tinted = blend_func(pixel, color)
+
+                if has_alpha:
+                    tinted += (pixel[3],)
+
                 images[i].putpixel((x, y), tinted)
 
     return images
-
 
 def parse_paths(input_paths, base_path):
     if base_path is not None:
@@ -44,7 +50,6 @@ def parse_paths(input_paths, base_path):
 
     return paths
 
-
 def parse_colors(color_strs):
     colors, colors_ok = [], True
 
@@ -59,20 +64,23 @@ def parse_colors(color_strs):
 
     return colors, colors_ok
 
-
 def load_images(paths):
     images = []
 
     for img_path in paths:
         try:
-            images.append(Image.open(img_path, "r"))
+            image = Image.open(img_path, "r")
+
+            if not image.mode in ["RGB", "RGBA"]:
+                image = image.convert("RGB")
+
+            images.append(image)
         except FileNotFoundError:
             print(f"Error: Texture \"{img_path}\" wasn't found.")
         except UnidentifiedImageError:
             print(f"Error: Texture \"{img_path}\" is invalid.")
 
     return images
-
 
 def tint_and_save_images(images, colors, paths, output):
     output = path.abspath(output)
@@ -97,9 +105,7 @@ def tint_and_save_images(images, colors, paths, output):
             tinted_image.save(img_path)
             print("Saved:", img_path)
 
-
 usage = "Run python tinter.py --help for usage."
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -131,7 +137,6 @@ def main():
 
     images = load_images(paths)
     tint_and_save_images(images, colors, paths, args.output)
-
 
 if __name__ == "__main__":
     main()
